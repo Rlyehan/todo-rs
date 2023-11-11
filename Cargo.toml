@@ -1,0 +1,9 @@
+[package]
+name = "todo-rs"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tui = {version = "0.19", default-features = false, features = ['termion'] }
+crossterm = "0.25"
+termion = "2.0"
