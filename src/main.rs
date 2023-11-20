@@ -1,3 +1,6 @@
+use serde::{Deserialize, Serialize};
+use std::fs::File;
+use std::io::BufReader;
 use std::{
     io::{self},
     thread,
@@ -12,6 +15,7 @@ use tui::{
     Terminal,
 };
 
+#[derive(Serialize, Deserialize)]
 struct Task {
     description: String,
 }
@@ -66,6 +70,24 @@ impl AppState {
             }
         }
     }
+
+    fn load_tasks(&mut self, file_path: &str) {
+        match File::open(file_path) {
+            Ok(file) => {
+                let reader = BufReader::new(file);
+                match serde_json::from_reader(reader) {
+                    Ok(tasks) => self.tasks = tasks,
+                    Err(e) => eprintln!("Failed to parse tasks from JSON: {}", e),
+                }
+            }
+            Err(e) => eprintln!("Failed to open file: {}", e),
+        }
+    }
+
+    fn save_tasks(&mut self, file_path: &str) {
+        let file = File::create(file_path).unwrap();
+        serde_json::to_writer(file, &self.tasks).unwrap();
+    }
 }
 
 fn main() -> Result<(), io::Error> {
@@ -75,12 +97,47 @@ fn main() -> Result<(), io::Error> {
     terminal.clear()?;
 
     let mut app_state = AppState::new();
+    app_state.load_tasks("tasks.json");
+    println!("Loaded {} tasks", app_state.tasks.len());
     let mut keys = io::stdin().keys();
 
     terminal.draw(|f| {
         let size = f.size();
-        let block = Block::default().title("Task List").borders(Borders::ALL);
-        f.render_widget(block, size)
+
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .margin(1)
+            .constraints([Constraint::Length(3), Constraint::Min(0)].as_ref())
+            .split(size);
+
+        let (title, input_text) = match app_state.mode {
+            Mode::Input => ("Input", format!("Input Mode: {}", app_state.input)),
+            Mode::Edit => ("Edit", format!("Editing: {}", app_state.input)),
+            _ => ("Input", "Press 'n' to add a task".to_string()),
+        };
+
+        let input_paragraph =
+            Paragraph::new(input_text).block(Block::default().borders(Borders::ALL).title(title));
+        f.render_widget(input_paragraph, chunks[0]);
+
+        let tasks: Vec<ListItem> = app_state
+            .tasks
+            .iter()
+            .enumerate()
+            .map(|(i, task)| {
+                let content = task.description.as_str();
+                let item = ListItem::new(content);
+                if Some(i) == app_state.selected_task {
+                    item.style(Style::default().fg(Color::Yellow))
+                } else {
+                    item
+                }
+            })
+            .collect();
+
+        let tasks_list =
+            List::new(tasks).block(Block::default().borders(Borders::ALL).title("Tasks"));
+        f.render_widget(tasks_list, chunks[1])
     })?;
 
     loop {
@@ -179,6 +236,7 @@ fn main() -> Result<(), io::Error> {
         thread::sleep(Duration::from_millis(100));
     }
 
+    app_state.save_tasks("tasks.json");
     terminal.clear()?;
     terminal.set_cursor(0, 0)?;
     terminal.show_cursor()?;
