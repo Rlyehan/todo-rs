@@ -22,11 +22,17 @@ impl Task {
     }
 }
 
+#[derive(PartialEq)]
+enum Mode {
+    Normal,
+    Input,
+    Edit,
+}
+
 struct AppState {
     tasks: Vec<Task>,
     input: String,
-    input_mode: bool,
-    edit_mode: bool,
+    mode: Mode,
     selected_task: Option<usize>,
 }
 
@@ -35,8 +41,7 @@ impl AppState {
         AppState {
             tasks: Vec::new(),
             input: String::new(),
-            input_mode: false,
-            edit_mode: false,
+            mode: Mode::Normal,
             selected_task: Some(0),
         }
     }
@@ -80,34 +85,55 @@ fn main() -> Result<(), io::Error> {
 
     loop {
         if let Some(Ok(key)) = keys.next() {
-            match key {
-                Key::Char('q') => break,
-                Key::Char('n') if !app_state.input_mode => {
-                    app_state.input_mode = true;
-                    app_state.input.clear();
-                }
-                Key::Char('\n') if app_state.input_mode => {
-                    app_state.add_task(app_state.input.clone());
-                    app_state.input_mode = false;
-                }
-                Key::Char(c) if app_state.input_mode => {
-                    app_state.input.push(c);
-                }
-                Key::Backspace if app_state.input_mode => {
-                    app_state.input.pop();
-                }
-                Key::Up => {
-                    if let Some(selected) = app_state.selected_task {
-                        app_state.selected_task = Some(selected.saturating_sub(1));
+            match app_state.mode {
+                Mode::Normal => match key {
+                    Key::Char('q') => break,
+                    Key::Char('n') => {
+                        app_state.mode = Mode::Input;
+                        app_state.input.clear();
                     }
-                }
-                Key::Down => {
-                    if let Some(selected) = app_state.selected_task {
-                        app_state.selected_task =
-                            Some((selected + 1).min(app_state.tasks.len().saturating_sub(1)));
+                    Key::Char('d') => {
+                        app_state.delete_task();
                     }
-                }
-                _ => {}
+                    Key::Char('e') if app_state.selected_task.is_some() => {
+                        app_state.mode = Mode::Edit;
+                        app_state.input = app_state.tasks[app_state.selected_task.unwrap()]
+                            .description
+                            .clone();
+                    }
+                    Key::Up => {
+                        if let Some(selected) = app_state.selected_task {
+                            app_state.selected_task = Some(selected.saturating_sub(1));
+                        }
+                    }
+                    Key::Down => {
+                        if let Some(selected) = app_state.selected_task {
+                            app_state.selected_task =
+                                Some((selected + 1).min(app_state.tasks.len().saturating_sub(1)));
+                        }
+                    }
+                    _ => {}
+                },
+                Mode::Input | Mode::Edit => match key {
+                    Key::Char('\n') => {
+                        if let Mode::Edit = app_state.mode {
+                            if let Some(index) = app_state.selected_task {
+                                app_state.update_task(app_state.input.clone());
+                                app_state.selected_task = Some(index);
+                            }
+                        } else {
+                            app_state.add_task(app_state.input.clone());
+                        }
+                        app_state.mode = Mode::Normal;
+                    }
+                    Key::Char(c) => {
+                        app_state.input.push(c);
+                    }
+                    Key::Backspace => {
+                        app_state.input.pop();
+                    }
+                    _ => {}
+                },
             }
         }
 
@@ -120,14 +146,14 @@ fn main() -> Result<(), io::Error> {
                 .constraints([Constraint::Length(3), Constraint::Min(0)].as_ref())
                 .split(size);
 
-            let input_text = if app_state.input_mode {
-                format!("Input Mode: {}", app_state.input)
-            } else {
-                "Press 'n' to add a task".to_string()
+            let (title, input_text) = match app_state.mode {
+                Mode::Input => ("Input", format!("Input Mode: {}", app_state.input)),
+                Mode::Edit => ("Edit", format!("Editing: {}", app_state.input)),
+                _ => ("Input", "Press 'n' to add a task".to_string()),
             };
 
             let input_paragraph = Paragraph::new(input_text)
-                .block(Block::default().borders(Borders::ALL).title("Input"));
+                .block(Block::default().borders(Borders::ALL).title(title));
             f.render_widget(input_paragraph, chunks[0]);
 
             let tasks: Vec<ListItem> = app_state
