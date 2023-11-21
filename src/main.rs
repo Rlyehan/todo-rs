@@ -31,6 +31,7 @@ enum Mode {
     Normal,
     Input,
     Edit,
+    DeleteConfirm,
 }
 
 struct AppState {
@@ -149,8 +150,8 @@ fn main() -> Result<(), io::Error> {
                         app_state.mode = Mode::Input;
                         app_state.input.clear();
                     }
-                    Key::Char('d') => {
-                        app_state.delete_task();
+                    Key::Char('d') if app_state.selected_task.is_some() => {
+                        app_state.mode = Mode::DeleteConfirm;
                     }
                     Key::Char('e') if app_state.selected_task.is_some() => {
                         app_state.mode = Mode::Edit;
@@ -170,6 +171,13 @@ fn main() -> Result<(), io::Error> {
                         }
                     }
                     _ => {}
+                },
+                Mode::DeleteConfirm => match key {
+                    Key::Char('d') => {
+                        app_state.delete_task();
+                        app_state.mode = Mode::Normal;
+                    }
+                    _ => app_state.mode = Mode::Normal,
                 },
                 Mode::Input | Mode::Edit => match key {
                     Key::Char('\n') => {
@@ -206,6 +214,10 @@ fn main() -> Result<(), io::Error> {
             let (title, input_text) = match app_state.mode {
                 Mode::Input => ("Input", format!("Input Mode: {}", app_state.input)),
                 Mode::Edit => ("Edit", format!("Editing: {}", app_state.input)),
+                Mode::DeleteConfirm => (
+                    "Delete",
+                    "Press 'd' again to confirm deletion, or any other key to cancel.".to_string(),
+                ),
                 _ => ("Input", "Press 'n' to add a task".to_string()),
             };
 
