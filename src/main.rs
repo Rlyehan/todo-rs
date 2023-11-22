@@ -71,6 +71,11 @@ impl AppState {
     fn load_tasks(&mut self, file_path: &str) -> Result<(), io::Error> {
         let file = match File::open(file_path) {
             Ok(f) => f,
+            Err(ref e) if e.kind() == io::ErrorKind::NotFound => {
+                let file = File::create(file_path)?;
+                serde_json::to_writer(&file, &Vec::<Task>::new())?;
+                return Ok(());
+            }
             Err(e) => return Err(e),
         };
 
