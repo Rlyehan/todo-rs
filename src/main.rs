@@ -68,22 +68,30 @@ impl AppState {
         }
     }
 
-    fn load_tasks(&mut self, file_path: &str) {
-        match File::open(file_path) {
-            Ok(file) => {
-                let reader = BufReader::new(file);
-                match serde_json::from_reader(reader) {
-                    Ok(tasks) => self.tasks = tasks,
-                    Err(e) => eprintln!("Failed to parse tasks from JSON: {}", e),
-                }
+    fn load_tasks(&mut self, file_path: &str) -> Result<(), io::Error> {
+        let file = match File::open(file_path) {
+            Ok(f) => f,
+            Err(e) => return Err(e),
+        };
+
+        let reader = BufReader::new(file);
+        match serde_json::from_reader(reader) {
+            Ok(tasks) => {
+                self.tasks = tasks;
+                Ok(())
             }
-            Err(e) => eprintln!("Failed to open file: {}", e),
+            Err(e) => Err(io::Error::new(io::ErrorKind::Other, e)),
         }
     }
 
-    fn save_tasks(&mut self, file_path: &str) {
-        let file = File::create(file_path).unwrap();
-        serde_json::to_writer(file, &self.tasks).unwrap();
+    fn save_tasks(&self, file_path: &str) -> Result<(), io::Error> {
+        let file = match File::create(file_path) {
+            Ok(f) => f,
+            Err(e) => return Err(e),
+        };
+
+        serde_json::to_writer(file, &self.tasks)
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
     }
 }
 
@@ -91,7 +99,9 @@ fn main() -> Result<(), io::Error> {
     let mut terminal = initialize_terminal()?;
 
     let mut app_state = AppState::new();
-    app_state.load_tasks("tasks.json");
+    if let Err(e) = app_state.load_tasks("tasks.json") {
+        eprintln!("Error loading tasks: {}", e);
+    };
     println!("Loaded {} tasks", app_state.tasks.len());
     let mut keys = io::stdin().keys();
 
@@ -111,7 +121,9 @@ fn main() -> Result<(), io::Error> {
         }
     }
 
-    app_state.save_tasks("tasks.json");
+    if let Err(e) = app_state.save_tasks("tasks.json") {
+        eprintln!("Error saving tasks: {}", e);
+    };
     terminal.clear()?;
     terminal.set_cursor(0, 0)?;
     terminal.show_cursor()?;
