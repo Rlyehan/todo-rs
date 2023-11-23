@@ -6,7 +6,8 @@ use termion::{event::Key, input::TermRead, raw::IntoRawMode, raw::RawTerminal};
 use tui::{
     backend::{Backend, TermionBackend},
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Style},
+    style::{Color, Modifier, Style},
+    text::Text,
     widgets::{Block, Borders, List, ListItem, Paragraph},
     Frame, Terminal,
 };
@@ -14,11 +15,19 @@ use tui::{
 #[derive(Serialize, Deserialize)]
 struct Task {
     description: String,
+    completed: bool,
 }
 
 impl Task {
     fn new(description: String) -> Task {
-        Task { description }
+        Task {
+            description,
+            completed: false,
+        }
+    }
+
+    fn toggle_completed(&mut self) {
+        self.completed = !self.completed;
     }
 }
 
@@ -90,13 +99,12 @@ impl AppState {
     }
 
     fn save_tasks(&self, file_path: &str) -> Result<(), io::Error> {
-        let file = match File::create(file_path) {
-            Ok(f) => f,
-            Err(e) => return Err(e),
-        };
+        let file = File::create(file_path)?;
 
-        serde_json::to_writer(file, &self.tasks)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+        let active_tasks: Vec<&Task> = self.tasks.iter().filter(|t| !t.completed).collect();
+        serde_json::to_writer(file, &active_tasks)?;
+
+        Ok(())
     }
 }
 
@@ -126,9 +134,7 @@ fn main() -> Result<(), io::Error> {
         }
     }
 
-    if let Err(e) = app_state.save_tasks("tasks.json") {
-        eprintln!("Error saving tasks: {}", e);
-    };
+    app_state.save_tasks("tasks.json")?;
     terminal.clear()?;
     terminal.set_cursor(0, 0)?;
     terminal.show_cursor()?;
@@ -141,13 +147,20 @@ fn render_tasks<B: Backend>(f: &mut Frame<B>, app_state: &AppState, chunk: Rect)
         .iter()
         .enumerate()
         .map(|(i, task)| {
-            let content = task.description.as_str();
-            let item = ListItem::new(content);
-            if Some(i) == app_state.selected_task {
-                item.style(Style::default().fg(Color::Yellow))
+            let is_selected = Some(i) == app_state.selected_task;
+            //Was not able to have both color and cross out for selecting completed tasks working
+            let base_style = if task.completed && !is_selected {
+                Style::default()
+                    .fg(Color::LightRed)
+                    .add_modifier(Modifier::CROSSED_OUT)
+            } else if is_selected {
+                Style::default().fg(Color::Yellow)
             } else {
-                item
-            }
+                Style::default()
+            };
+
+            let content = Text::styled(task.description.as_str(), base_style);
+            ListItem::new(content)
         })
         .collect();
 
@@ -205,6 +218,13 @@ fn process_key_event(key: Key, app_state: &mut AppState) -> bool {
                 app_state.input = app_state.tasks[app_state.selected_task.unwrap()]
                     .description
                     .clone();
+            }
+            Key::Char('c') if app_state.selected_task.is_some() => {
+                if let Some(index) = app_state.selected_task {
+                    if let Some(task) = app_state.tasks.get_mut(index) {
+                        task.toggle_completed();
+                    }
+                }
             }
             Key::Up => {
                 if let Some(selected) = app_state.selected_task {
