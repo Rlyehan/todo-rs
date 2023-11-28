@@ -9,3 +9,4 @@ serde_json = "1.0"
 tui = {version = "0.19", default-features = false, features = ['termion'] }
 crossterm = "0.25"
 termion = "2.0"
+chrono = "0.4"

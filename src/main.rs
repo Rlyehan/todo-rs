@@ -1,3 +1,5 @@
+use chrono::Datelike;
+use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::{self};
@@ -16,13 +18,21 @@ use tui::{
 struct Task {
     description: String,
     completed: bool,
+
+    #[serde(
+        serialize_with = "serialize_date",
+        deserialize_with = "deserialize_date",
+        default
+    )]
+    deadline: Option<NaiveDateTime>,
 }
 
 impl Task {
-    fn new(description: String) -> Task {
+    fn new(description: String, deadline: Option<NaiveDateTime>) -> Task {
         Task {
             description,
             completed: false,
+            deadline,
         }
     }
 
@@ -37,6 +47,7 @@ enum Mode {
     Input,
     Edit,
     DeleteConfirm,
+    DeadlineInput,
 }
 
 struct AppState {
@@ -44,6 +55,8 @@ struct AppState {
     input: String,
     mode: Mode,
     selected_task: Option<usize>,
+    temp_description: String,
+    setting_deadline: bool,
 }
 
 impl AppState {
@@ -53,26 +66,29 @@ impl AppState {
             input: String::new(),
             mode: Mode::Normal,
             selected_task: Some(0),
+            temp_description: String::new(),
+            setting_deadline: false,
         }
     }
 
-    fn add_task(&mut self, description: String) {
-        let task = Task::new(description);
+    fn add_task(&mut self, description: String, deadline: Option<NaiveDateTime>) {
+        let task = Task::new(description, deadline);
         self.tasks.push(task);
+    }
+
+    fn update_task(&mut self, description: String, deadline: Option<NaiveDateTime>) {
+        if let Some(index) = self.selected_task {
+            if let Some(task) = self.tasks.get_mut(index) {
+                task.description = description;
+                task.deadline = deadline;
+            }
+        }
     }
 
     fn delete_task(&mut self) {
         if let Some(index) = self.selected_task {
             if index < self.tasks.len() {
                 self.tasks.remove(index);
-            }
-        }
-    }
-
-    fn update_task(&mut self, description: String) {
-        if let Some(index) = self.selected_task {
-            if let Some(task) = self.tasks.get_mut(index) {
-                task.description = description;
             }
         }
     }
@@ -105,6 +121,37 @@ impl AppState {
         serde_json::to_writer(file, &active_tasks)?;
 
         Ok(())
+    }
+}
+
+fn calculate_deadline(option: &str) -> Option<NaiveDateTime> {
+    let today = chrono::Local::now().date_naive();
+    match option {
+        "Today" => Some(today.and_hms_opt(0, 0, 0).unwrap()),
+        "Tomorrow" => Some(
+            (today + chrono::Duration::days(1))
+                .and_hms_opt(0, 0, 0)
+                .unwrap(),
+        ),
+        "This Week" => {
+            let days_until_end_of_week = 6 - today.weekday().num_days_from_sunday() as i64;
+            Some(
+                (today + chrono::Duration::days(days_until_end_of_week))
+                    .and_hms_opt(0, 0, 0)
+                    .unwrap(),
+            )
+        }
+        "This Month" => {
+            let first_day_next_month = today
+                .with_day(0)
+                .and_then(|date| date.checked_add_signed(chrono::Duration::days(1)));
+            first_day_next_month.map(|date| {
+                (date - chrono::Duration::days(1))
+                    .and_hms_opt(0, 0, 0)
+                    .unwrap()
+            })
+        }
+        _ => None,
     }
 }
 
@@ -142,14 +189,20 @@ fn main() -> Result<(), io::Error> {
 }
 
 fn render_tasks<B: Backend>(f: &mut Frame<B>, app_state: &AppState, chunk: Rect) {
+    let today = chrono::Local::now().naive_local();
     let tasks: Vec<ListItem> = app_state
         .tasks
         .iter()
         .enumerate()
         .map(|(i, task)| {
             let is_selected = Some(i) == app_state.selected_task;
-            //Was not able to have both color and cross out for selecting completed tasks working
-            let base_style = if task.completed && !is_selected {
+            let is_overdue = task
+                .deadline
+                .map_or(false, |d| d < today.into() && !task.completed);
+
+            let base_style = if is_overdue {
+                Style::default().fg(Color::Red)
+            } else if task.completed && !is_selected {
                 Style::default()
                     .fg(Color::LightRed)
                     .add_modifier(Modifier::CROSSED_OUT)
@@ -176,6 +229,10 @@ fn render_input_paragraph<B: Backend>(f: &mut Frame<B>, app_state: &AppState, ch
             "Delete",
             "Press 'd' again to confirm deletion, or any other key to cancel.".to_string(),
         ),
+        Mode::DeadlineInput => {
+            let deadline_options = "1: Today, 2: Tomorrow, 3: This Week, 4: This Month";
+            ("Select Deadline", deadline_options.to_string())
+        }
         _ => ("Input", "Press 'n' to add a task".to_string()),
     };
 
@@ -250,15 +307,11 @@ fn process_key_event(key: Key, app_state: &mut AppState) -> bool {
         },
         Mode::Input | Mode::Edit => match key {
             Key::Char('\n') => {
-                if !app_state.input.is_empty() {
-                    if let Mode::Edit = app_state.mode {
-                        app_state.update_task(app_state.input.clone());
-                    } else {
-                        app_state.add_task(app_state.input.clone());
-                    }
+                if !app_state.setting_deadline {
+                    app_state.temp_description = app_state.input.clone();
+                    app_state.input.clear();
+                    app_state.mode = Mode::DeadlineInput;
                 }
-                app_state.mode = Mode::Normal;
-                app_state.input.clear();
             }
             Key::Char(c) => {
                 app_state.input.push(c);
@@ -268,6 +321,52 @@ fn process_key_event(key: Key, app_state: &mut AppState) -> bool {
             }
             _ => {}
         },
+        Mode::DeadlineInput => match key {
+            Key::Char('1') => app_state.input = "Today".to_string(),
+            Key::Char('2') => app_state.input = "Tomorrow".to_string(),
+            Key::Char('3') => app_state.input = "This Week".to_string(),
+            Key::Char('4') => app_state.input = "This Month".to_string(),
+            Key::Char('q') | Key::Esc => {
+                app_state.mode = Mode::Normal;
+            }
+            Key::Char('\n') => {
+                let deadline_option = app_state.input.clone();
+                let deadline = calculate_deadline(&deadline_option);
+
+                let description = std::mem::take(&mut app_state.temp_description);
+                if let Mode::Edit = app_state.mode {
+                    app_state.update_task(description, deadline);
+                } else {
+                    app_state.add_task(description, deadline);
+                }
+
+                app_state.mode = Mode::Normal;
+            }
+            _ => {}
+        },
     }
     true
+}
+
+fn serialize_date<S>(date: &Option<NaiveDateTime>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    match date {
+        Some(d) => serializer.serialize_str(&d.format("%Y-%m-%d %H:%M:%S").to_string()),
+        None => serializer.serialize_none(),
+    }
+}
+
+fn deserialize_date<'de, D>(deserializer: D) -> Result<Option<NaiveDateTime>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let s: Option<String> = Option::deserialize(deserializer)?;
+    match s {
+        Some(str) => NaiveDateTime::parse_from_str(&str, "%Y-%m-%d %H:%M:%S")
+            .map(Some)
+            .map_err(serde::de::Error::custom),
+        None => Ok(None),
+    }
 }
