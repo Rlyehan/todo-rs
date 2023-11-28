@@ -141,16 +141,6 @@ fn calculate_deadline(option: &str) -> Option<NaiveDateTime> {
                     .unwrap(),
             )
         }
-        "This Month" => {
-            let first_day_next_month = today
-                .with_day(0)
-                .and_then(|date| date.checked_add_signed(chrono::Duration::days(1)));
-            first_day_next_month.map(|date| {
-                (date - chrono::Duration::days(1))
-                    .and_hms_opt(0, 0, 0)
-                    .unwrap()
-            })
-        }
         _ => None,
     }
 }
@@ -204,7 +194,7 @@ fn render_tasks<B: Backend>(f: &mut Frame<B>, app_state: &AppState, chunk: Rect)
                 Style::default().fg(Color::Red)
             } else if task.completed && !is_selected {
                 Style::default()
-                    .fg(Color::LightRed)
+                    .fg(Color::LightGreen)
                     .add_modifier(Modifier::CROSSED_OUT)
             } else if is_selected {
                 Style::default().fg(Color::Yellow)
@@ -230,7 +220,7 @@ fn render_input_paragraph<B: Backend>(f: &mut Frame<B>, app_state: &AppState, ch
             "Press 'd' again to confirm deletion, or any other key to cancel.".to_string(),
         ),
         Mode::DeadlineInput => {
-            let deadline_options = "1: Today, 2: Tomorrow, 3: This Week, 4: This Month";
+            let deadline_options = "1: Today, 2: Tomorrow, 3: This Week";
             ("Select Deadline", deadline_options.to_string())
         }
         _ => ("Input", "Press 'n' to add a task".to_string()),
@@ -325,7 +315,6 @@ fn process_key_event(key: Key, app_state: &mut AppState) -> bool {
             Key::Char('1') => app_state.input = "Today".to_string(),
             Key::Char('2') => app_state.input = "Tomorrow".to_string(),
             Key::Char('3') => app_state.input = "This Week".to_string(),
-            Key::Char('4') => app_state.input = "This Month".to_string(),
             Key::Char('q') | Key::Esc => {
                 app_state.mode = Mode::Normal;
             }
