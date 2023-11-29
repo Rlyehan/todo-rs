@@ -134,7 +134,7 @@ fn calculate_deadline(option: &str) -> Option<NaiveDateTime> {
                 .unwrap(),
         ),
         "This Week" => {
-            let days_until_end_of_week = 6 - today.weekday().num_days_from_sunday() as i64;
+            let days_until_end_of_week = today.weekday().num_days_from_sunday() as i64;
             Some(
                 (today + chrono::Duration::days(days_until_end_of_week))
                     .and_hms_opt(0, 0, 0)
